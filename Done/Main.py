@@ -1,11 +1,41 @@
+import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
-df = pd.read_excel(r"Copy of Oilcomp EN_200 MS xxxx_v110-Dr.Hii.xlsm", sheet_name="Database")
+import math
+import GraphFunctions as cBS10
+import os
+
+sample1ratio=1 #important (set sample index for ratio) sample number -1
+sample2ratio=2
+
+sample1BS10=1 #important (set sample index for normalising into BS10) sample number -1
+sample2BS10=2
+
+sample1Phy=1 #important (set sample index for normalising into Phytane) sample number -1
+sample2Phy=2
+
+sample1Hopane=1 #important (set sample index for normalising into Hopane) sample number -1
+sample2Hopane=3
+
+#import excel spreadsheet
+df = pd.read_excel(r"C:\Users\zanyi\OneDrive\Git hub\Graph\Done\Oilcomp EN_200 MS xxxx_v110-Dr.Hii.xlsm", sheet_name="Database")
 df = df.iloc[9:154,]
 df.dropna()
 df = df.loc[:, (df != 0).all(axis=0)]
 print(df)
 df.to_csv('file2.csv', header=True, index=False)
 df.set_index("DATABASE",inplace=True)
+
+#rename dataframe columns
+columnIndex = 0
+samplecount = 0
+for i in range(3,len(df.columns),2):
+    df.columns.values[i-1]=f"sample{samplecount}Ret"
+    df.columns.values[i]=f"sample{samplecount}Value"
+    samplecount+=1
+
+print(df.loc["1_1-M-Adam"])
+print(df)
 
 #declare important functions (normalisation, ratio, etc)
 def removeFN(string):
@@ -24,7 +54,28 @@ def ratio(compound1,compound2,sample=0,Normative=True):
             return ["NR-"+removeFN(compound1)+"/"+removeFN(compound2), 0.0001]
         else:
             return [removeFN(compound1)+"/"+removeFN(compound2), 0.0001]
-        
+
+def NormaliseToBS10(compound, sample1=1, sample2=2):
+    print("Normalising "+compound+" to BS10")
+    if df.loc["24_BS10"][f"sample{sample1}Value"]>1:
+        return [df.loc[compound][f"sample{sample1}Ret"], compound, df.loc[compound][f"sample{sample1}Value"], df.loc[compound][f"sample{sample2}Value"], df.loc[compound][f"sample{sample1}Value"]/df.loc["24_BS10"][f"sample{sample1}Value"]*df.loc["24_BS10"][f"sample{sample2}Value"]]
+    else:
+        return [df.loc[compound][f"sample{sample1}Ret"], compound, df.loc[compound][f"sample{sample1}Value"], df.loc[compound][f"sample{sample2}Value"], 0.001]
+    
+def NormaliseToPhytane(compound, sample1=1, sample2=2):
+    print("Normalising "+compound+" to Phytane")
+    if df.loc["33_Phy"][f"sample{sample1}Value"]>1:
+        return [df.loc[compound][f"sample{sample1}Ret"], compound, df.loc[compound][f"sample{sample1}Value"], df.loc[compound][f"sample{sample2}Value"], df.loc[compound][f"sample{sample1}Value"]/df.loc["33_Phy"][f"sample{sample1}Value"]*df.loc["33_Phy"][f"sample{sample2}Value"]]
+    else:
+        return [df.loc[compound][f"sample{sample1}Ret"], compound, df.loc[compound][f"sample{sample1}Value"], df.loc[compound][f"sample{sample2}Value"], 0.001]
+
+def NormaliseToHopane(compound, sample1=1, sample2=3):
+    print("Normalising "+compound+" to Hopane")
+    if df.loc["64_30ab"][f"sample{sample1}Value"]>1:
+        return [df.loc[compound][f"sample{sample1}Ret"], compound, df.loc[compound][f"sample{sample1}Value"], df.loc[compound][f"sample{sample2}Value"], df.loc[compound][f"sample{sample1}Value"]/df.loc["64_30ab"][f"sample{sample1}Value"]*df.loc["64_30ab"][f"sample{sample2}Value"]]
+    else:
+        return [df.loc[compound][f"sample{sample1}Ret"], compound, df.loc[compound][f"sample{sample1}Value"], df.loc[compound][f"sample{sample2}Value"], 0.001]
+    
 #declare function to run all set ratios
 def createRatio(sampleNo=0):
     NormarativeRatio=[]
@@ -112,3 +163,94 @@ def createRatio(sampleNo=0):
     norm = pd.DataFrame(NormarativeRatio, columns=["Compounds","ratio"])
     fin = pd.concat([norm,infor])
     return [fin,infor,norm]
+
+#run finctions and create DataFrames for each set of output
+A=createRatio(sample1ratio)[0]
+B=createRatio(sample2ratio)[0]
+A = A.assign(ratio2=B.loc[:,'ratio'])
+A.columns.values[1] = "A"
+A.columns.values[2] = "B"
+
+NormalisedToBS10=[]
+for rows in df.index:
+    NormalisedToBS10.append(NormaliseToBS10(rows,sample1BS10,sample2BS10))
+BS10DataFrame=pd.DataFrame(NormalisedToBS10,columns=[f"RetentionTime Sample {sample1BS10}", "Compounds", "A", "B", "NormalisedToBS10"])
+
+NormalisedToPhytane=[]
+for rows in df.index:
+    NormalisedToPhytane.append(NormaliseToPhytane(rows,sample1Phy,sample2Phy))
+PhytaneDataFrame=pd.DataFrame(NormalisedToPhytane,columns=[f"RetentionTime Sample {sample1Phy}", "Compounds", "A", "B", "NormalisedToPhytane"])
+
+NormalisedToHopane=[]
+for rows in df.index:
+    NormalisedToHopane.append(NormaliseToHopane(rows,sample1Hopane,sample2Hopane))
+HopaneDataFrame=pd.DataFrame(NormalisedToHopane,columns=[f"RetentionTime Sample {sample1Hopane}", "Compounds", "A", "B", "NormalisedToHopane"])
+
+#define and run function for computing new rows with different value
+#ratio
+def mean(row):
+    return (row['A']+row['B'])/2
+def absDiff(row):
+    return abs(row['A']-row['B'])
+def relDiff(row):
+    if row['mean']>0:
+        return (row['absoluteDifference']/row['mean'])*100
+    else:
+        return 0.0001
+def flagging(row):
+    if row['relativeDifference%']>14:
+        return 1
+    else:
+        return 0
+A['mean'] = A.apply(mean,axis=1)
+A['absoluteDifference'] = A.apply(absDiff,axis=1)
+A['relativeDifference%'] = A.apply(relDiff,axis=1)
+A['14%flag'] = A.apply(flagging,axis=1)
+
+
+#normalise to BS10
+def AfterNorm2of3BS10(row):
+    if row["B"]>1:
+        return 100*row["NormalisedToBS10"]/row["B"]
+    else:
+        return 0.0001
+    
+BS10DataFrame["% 2/3 After Normalisation"]=BS10DataFrame.apply(AfterNorm2of3BS10, axis=1)
+print(BS10DataFrame)
+
+#normalise to Phytane
+def AfterNorm2of3Phy(row):
+    if row["B"]>1:
+        return 100*row["NormalisedToPhytane"]/row["B"]
+    else:
+        return 0.0001
+    
+PhytaneDataFrame["% 2/3 After Normalisation"]=PhytaneDataFrame.apply(AfterNorm2of3Phy, axis=1)
+print(PhytaneDataFrame)
+
+#normalise to Hopane
+def AfterNorm2of4Hopane(row):
+    if row["B"]>1:
+        return 100*row["NormalisedToHopane"]/row["B"]
+    else:
+        return 0.0001
+
+HopaneDataFrame["% 2/3 After Normalisation"]=HopaneDataFrame.apply(AfterNorm2of4Hopane, axis=1)
+print(HopaneDataFrame)
+
+print(A)
+
+#save down all dataframe as CSV
+BS10DataFrame.to_csv('BS10DataFrame.csv')
+PhytaneDataFrame.to_csv('PhytaneDataFrame.csv')
+HopaneDataFrame.to_csv('HopaneDataFrame.csv')
+A.to_csv('RatioDataFrame.csv')
+
+#########################################################################################################################################################################################
+#create Normalised BS10 Line graph
+cBS10.createBS10Line(df=BS10DataFrame,name="BS10LineGraph.png")
+cBS10.createBS10Line(df=PhytaneDataFrame,name="PhytaneLineGraph.png")
+cBS10.createBS10Line(df=HopaneDataFrame,name="HopaneLineGraph.png")
+plt.show()
+cBS10.createBS10Bar(df=A, name="BarGraph.png")
+cBS10.createBS10Bar(df=A,fromIndex=44, toIndex=len(A), name="BarGraph2.png")
